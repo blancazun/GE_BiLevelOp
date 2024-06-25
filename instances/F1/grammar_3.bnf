@@ -1,0 +1,5 @@
+<start> ::= <expr>
+<expr> ::= ( <expr> <op> <expr> ) | <pre-op> ( <expr> ) | <var>
+<op> ::= + | - | / | *
+<pre-op> ::= np.sin | np.cos | np.sqrt
+<var> ::= x[:, 0] | 1
