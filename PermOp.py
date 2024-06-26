@@ -3,6 +3,7 @@ import numpy as np
 from pymoo.core.mutation import Mutation
 from pymoo.core.crossover import Crossover
 
+
 class OpMutation(Mutation):
     def __init__(self, size=3):
         """
