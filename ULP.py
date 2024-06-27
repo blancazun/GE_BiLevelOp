@@ -3,15 +3,13 @@ from pymoo.core.problem import Problem
 from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.operators.crossover.pntx import TwoPointCrossover
 from pymoo.operators.mutation.bitflip import BitflipMutation
-from pymoo.operators.sampling.rnd import IntegerRandomSampling
+from pymoo.operators.sampling.rnd import IntegerRandomSampling, PermutationRandomSampling
 from pymoo.termination import get_termination
 from GE import Grammar, mapping_depth_first, mapping_breadth_first, mapping_pigrammatical
-# import multiprocessing as mp
 from os.path import join
 from copy import deepcopy
 import numpy as np
 from SR import SR
-import matplotlib.pyplot as plt
 
 
 def evaluate_sr(grammar, sr, x, order=None):
@@ -19,14 +17,28 @@ def evaluate_sr(grammar, sr, x, order=None):
     return sr.evaluate(expr)
 
 
-class SRProblem(Problem):
-    def __init__(self, n_var=-1, xl=None, xu=None, grammar=None, instance=None, **kwargs):
+class UpperLevelProblem(Problem):
+    def __init__(self, llp, n_var=-1, xl=None, xu=None, grammar=None, instance=None, **kwargs):
         super().__init__(n_var, n_obj=1, n_constr=0, xl=xl, xu=xu, type_var=np.int_, elementwise_evaluation=False, **kwargs)
         self.grammar = deepcopy(grammar)
         self.sr_problem = deepcopy(instance)
+        self.llp = llp
 
     def _evaluate(self, x, out, *args, **kwargs):
+        # Evaluate the lower level problem
         out["F"] = np.asarray([evaluate_sr(self.grammar, self.sr_problem, item) for item in x])
+
+
+class LowerLevelProblem(Problem):
+    def __init__(self, n_var=-1, xl=None, xu=None, grammar=None, instance=None, **kwargs):
+        super().__init__(n_var, n_obj=1, n_constr=0, xl=xl, xu=xu, type_var=np.int_, elementwise_evaluation=False,
+                         **kwargs)
+        self.grammar = deepcopy(grammar)
+        self.sr_problem = deepcopy(instance)
+        self.values = np.random.permutation(n_var)
+
+    def _evaluate(self, x, out, *args, **kwargs):
+        out["F"] = np.asarray([evaluate_sr(self.grammar, self.sr_problem, self.values, item) for item in x])
 
 
 if __name__ == "__main__":
@@ -42,7 +54,10 @@ if __name__ == "__main__":
             sr_test = SR(file=join(instance_path, instance, "test.csv"))
 
             grammarP = Grammar(mapping=mapping, file=join(instance_path, instance, "grammar.bnf"))
-            problemP = SRProblem(100, xl=0.0, xu=255.0, grammar=grammarP,
+
+            llp = LowerLevelProblem(n_var=100, xl=0.0, xu=15.0, grammar=grammarP, instance=sr_train)
+
+            ulp = UpperLevelProblem(llp, n_var=100, xl=0.0, xu=255.0, grammar=grammarP,
                                  instance=sr_train)
 
             algorithm = GA(
@@ -52,10 +67,10 @@ if __name__ == "__main__":
                 crossover=TwoPointCrossover(),
                 mutation=BitflipMutation(),
             )
-            # ("op", OpMutation, dict(size=3))
-            termination = get_termination("n_eval", 25000)  # ("n_eval", 25000) # get_termination("n_gen", 1000)
 
-            res = minimize(problemP,
+            termination = get_termination("n_eval", 25000)
+
+            res = minimize(ulp,
                            algorithm,
                            termination,
                            save_history=True,
@@ -66,8 +81,3 @@ if __name__ == "__main__":
             results = grammarP.mapping(res.X)
             print(mapping.__name__, instance, results)
             print(res.F, sr_test.evaluate(results))
-
-            val = [e.opt.get("F")[0][0] for e in res.history]
-            plt.plot(np.arange(len(val)), val, label=f'{mapping.__name__}, {instance}')
-    plt.legend()
-    plt.show()

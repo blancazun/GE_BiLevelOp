@@ -2,7 +2,6 @@ import imp
 import pandas as pd
 import numpy as np
 
-from MathFunctions import psum, prest, pmult, pdiv
 class SR:
     def __init__(self, file=None):
         info = pd.read_csv(file)
