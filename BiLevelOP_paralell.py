@@ -69,10 +69,9 @@ class LowerLevelProblem(Problem):
         out["F"] = np.asarray([evaluate_sr(self.grammar, self.sr_problem, self.values, item) for item in x])
 
 
-
 if __name__ == '__main__':
     instance_path = "instances"
-    instances = ["Keijzer6"]  # "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "Keijzer6"
+    instances = ["F7"]  # "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "Keijzer6"
 
 
     """

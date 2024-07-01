@@ -7,12 +7,16 @@ from pymoo.operators.crossover.ox import OrderCrossover
 from pymoo.operators.mutation.bitflip import BitflipMutation
 from pymoo.operators.mutation.inversion import InversionMutation
 from pymoo.core.problem import Problem
+from pymoo.core.problem import ElementwiseProblem
 from SR import SR
 from GE import Grammar, mapping_depth_first, mapping_breadth_first, mapping_pigrammatical
 from os.path import join
 from copy import deepcopy
 import numpy as np
 import matplotlib.pyplot as plt
+import multiprocessing
+from pymoo.core.problem import StarmapParallelization
+from pymoo.core.callback import Callback
 
 
 def evaluate_sr(grammar, sr, x, order=None):
@@ -20,53 +24,43 @@ def evaluate_sr(grammar, sr, x, order=None):
     return sr.evaluate(expr)
 
 
-class UpperLevelProblem(Problem):
+class UpperLevelProblem(ElementwiseProblem):
     def __init__(self, n_var=-1, xl=None, xu=None, grammar=None, instance=None, **kwargs):
-        super().__init__(n_var, n_obj=1, n_constr=0, xl=xl, xu=xu,  **kwargs)
+        super().__init__(n_var=n_var, n_obj=1, n_constr=0, xl=xl, xu=xu,  **kwargs)
         self.grammar = deepcopy(grammar)
         self.sr_problem = deepcopy(instance)
 
     def _evaluate(self, x, out, *args, **kwargs):
-        # Evaluate the lower level problem
-        F = []
-        per = []
+        llp = LowerLevelProblem(x, xl=0, xu=self.n_var, grammar=self.grammar, instance=self.sr_problem)
 
+        algoritmo = GA(
+            pop_size=50,
+            eliminate_duplicates=True,
+            sampling=PermutationRandomSampling(),
+            crossover=OrderCrossover(),
+            mutation=InversionMutation(),
+        )
+        # ("op", OpMutation, dict(size=3))
+        termination = get_termination("n_gen", 10)  # ("n_eval", 25000) # get_termination("n_gen", 1000)
+
+        callback = MyCallback()
+
+        res = minimize(llp,
+                       algoritmo,
+                       termination,
+                       save_history=True,
+                       verbose=False,
+                       callback=callback)
+
+        out["F"] = evaluate_sr(self.grammar, self.sr_problem, x)
+        out["F"] = res.F
         """
-        Inicio de lo que se paralelizar, revisar si con GA o un SA
-        Hay que probar operadores de Cruza como OrderCrossOver o el PMX y Mutación como InversionMutation, 2 o 3 opt.
+                Buscar con el CallBack el regresar F, los valores de los codones (genotipo) y la permutacion
         """
-        for item in x:
-            llp = LowerLevelProblem(item, xl=0, xu=self.n_var, grammar=self.grammar, instance=self.sr_problem)
-
-            algoritmo = GA(
-                pop_size=10,
-                eliminate_duplicates=True,
-                sampling=PermutationRandomSampling(),
-                crossover=OrderCrossover(),
-                mutation=InversionMutation(),
-            )
-            # ("op", OpMutation, dict(size=3))
-            termination = get_termination("n_gen", 100)  # ("n_eval", 25000) # get_termination("n_gen", 1000)
-
-            res = minimize(llp,
-                           algoritmo,
-                           termination,
-                           save_history=True,
-                           verbose=False)
-            """
-            print("-" * 40)
-            print("Best solution found: \nX = %s\nF = %s" % (res.X, res.F))
-            """
-            F.append(res.F)
-            per.append(res.X)
-        """
-        Final de lo que se paralelizar
-        """
-
-        #implementar algo... (no se que) para guardar la mejor F y su respectiva per
-
-        out["F"] = np.asarray(F)
-        # print(out["F"])
+        # print("F: ", callback.data["F"])
+        # print("Perm: ", callback.data["Per"])
+        # print("Gen: ", callback.data["Gen"])
+        out["F"] = evaluate_sr(self.grammar, self.sr_problem, callback.data["Gen"], order=callback.data["Per"])
 
 
 class LowerLevelProblem(Problem):
@@ -81,15 +75,32 @@ class LowerLevelProblem(Problem):
         out["F"] = np.asarray([evaluate_sr(self.grammar, self.sr_problem, self.values, item) for item in x])
 
 
+class MyCallback(Callback):
+    def __init__(self) -> None:
+        super().__init__()
+        # self.data = {"F": [], "Gen": [], "Per": []}
+        self.data = {"F": float("inf"), "Gen": [], "Per": []}
+
+    def notify(self, algorithm):
+        # self.data["F"].append(algorithm.pop.get("F"))  # self.data["F"].append(algorithm.pop.gest("F").min())
+        # self.data["Gen"].append(algorithm.problem.values)
+        # self.data["Per"].append(algorithm.pop.get("X"))
+        best_solution = algorithm.opt[0]
+
+        if self.data["F"] > best_solution.get("F"):
+            self.data["F"] = best_solution.get("F")
+            self.data["Gen"] = algorithm.problem.values
+            self.data["Per"] = best_solution.get("X")
+
+
 if __name__ == '__main__':
     instance_path = "instances"
-    instances = ["F3"]  # "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "Keijzer6"
-
+    instances = ["F7"]  # "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "Keijzer6"
 
     """
     Hacer el calculo para trabajar con 250,000 elementos
     """
-    mappings = [mapping_depth_first, mapping_breadth_first]  # mapping_breadth_first, mapping_depth_first
+    mappings = [mapping_depth_first] #, mapping_breadth_first]  # mapping_breadth_first, mapping_depth_first
     val = []
     for mapping in mappings:
         for instance in instances[:2]:
@@ -98,24 +109,30 @@ if __name__ == '__main__':
 
             grammarP = Grammar(mapping=mapping, file=join(instance_path, instance, "grammar.bnf"))
 
+            pool = multiprocessing.Pool()
+            runner = StarmapParallelization(pool.starmap)
+
             ulp = UpperLevelProblem(n_var=100, xl=0.0, xu=255.0, grammar=grammarP,
-                                    instance=sr_train)
+                                    instance=sr_train, elementwise_runner=runner)
 
             algorithm = GA(
-                pop_size=10,
+                pop_size=20,
                 eliminate_duplicates=True,
                 sampling=IntegerRandomSampling(),
                 crossover=TwoPointCrossover(),
                 mutation=BitflipMutation(),
             )
 
-            termination = get_termination("n_eval", 200)
+            # termination = get_termination("n_eval", 25000)
+            termination = get_termination("n_gen", 10)
 
             res = minimize(ulp,
                            algorithm,
                            termination,
                            save_history=True,
                            verbose=True)
+
+            pool.close()
 
             print("-" * 40)
             print("Best solution found: \nX = %s\nF = %s" % (res.X, res.F))
